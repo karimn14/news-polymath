@@ -1,0 +1,8 @@
+{
+  "name": "Koran Pagi Polymath",
+  "description": "Artikel harian wawasan lintas disiplin dari 23 profesi bergaya koran cetak hitam-putih.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
