@@ -42,12 +42,30 @@ export default function App() {
   };
 
   const refreshCachedTopics = useCallback(async () => {
+    // 1. Try backend API first
     try {
       const res = await fetch('/api/cached-topics');
-      if (res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
         const data = await res.json();
-        if (Array.isArray(data.cachedIds)) {
+        if (Array.isArray(data.cachedIds) && data.cachedIds.length > 0) {
           setCachedTopicIds(data.cachedIds);
+          return;
+        }
+      }
+    } catch {
+      // Backend API not reachable or static deployment
+    }
+
+    // 2. Fallback to static articles database (supports pure static Vercel / Vite presets)
+    try {
+      const staticRes = await fetch('/data/articles_db.json');
+      const contentType = staticRes.headers.get('content-type') || '';
+      if (staticRes.ok && contentType.includes('application/json')) {
+        const db = await staticRes.json();
+        const ids = Object.keys(db).map(Number).filter((n) => !isNaN(n));
+        if (ids.length > 0) {
+          setCachedTopicIds(ids);
         }
       }
     } catch {
@@ -67,7 +85,7 @@ export default function App() {
     saveLastTopicId(targetId);
     setTopicId(targetId);
 
-    // Check cache first unless forced
+    // Check localStorage cache first unless forced
     if (!forceRefresh) {
       const cached = getCachedArticle(targetId);
       if (cached) {
@@ -79,31 +97,48 @@ export default function App() {
 
     setIsLoading(true);
     try {
-      const res = await fetch('/api/generate-briefing', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topicId: targetId }),
-      });
+      let articleData: ArticleData | null = null;
 
-      const data = await res.json();
-      if (!res.ok || !data.success || !data.article) {
-        let errStr = data.error || 'Gagal menghasilkan artikel dari redaksi AI.';
-        try {
-          const parsed = JSON.parse(errStr);
-          if (parsed?.error?.message) {
-            errStr = parsed.error.message;
+      // 1. Try backend API first (works in Node/serverless environment)
+      try {
+        const res = await fetch('/api/generate-briefing', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ topicId: targetId, forceRefresh }),
+        });
+        const contentType = res.headers.get('content-type') || '';
+        if (res.ok && contentType.includes('application/json')) {
+          const data = await res.json();
+          if (data.success && data.article) {
+            articleData = data.article;
           }
-        } catch {
-          // keep as string
         }
-        if (errStr.includes('503') || errStr.includes('high demand') || errStr.includes('UNAVAILABLE')) {
-          errStr = 'Model AI sedang mengalami lonjakan antrean sementara (503). Sistem telah mencoba mengalihkan model. Silakan tekan tombol "Coba Generate Kembali".';
-        }
-        throw new Error(errStr);
+      } catch {
+        // Backend API failed or unavailable
       }
 
-      setArticle(data.article);
-      cacheArticle(data.article);
+      // 2. If API was unavailable or returned non-JSON (e.g. pure static Vercel Vite deployment)
+      if (!articleData) {
+        try {
+          const staticRes = await fetch('/data/articles_db.json');
+          const contentType = staticRes.headers.get('content-type') || '';
+          if (staticRes.ok && contentType.includes('application/json')) {
+            const db = await staticRes.json();
+            if (db && db[targetId]) {
+              articleData = db[targetId];
+            }
+          }
+        } catch {
+          // static fallback failed
+        }
+      }
+
+      if (!articleData) {
+        throw new Error('Edisi bahan koran tidak dapat dimuat. Pastikan koneksi atau database aktif.');
+      }
+
+      setArticle(articleData);
+      cacheArticle(articleData);
       setReadTopics(getReadTopics());
       refreshCachedTopics();
     } catch (err: any) {
@@ -124,7 +159,7 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [refreshCachedTopics]);
 
   // When user selects a topic to start reading
   const handleStartReading = (targetId: number) => {

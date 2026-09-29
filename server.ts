@@ -1,7 +1,6 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
@@ -10,16 +9,15 @@ import { SEED_ARTICLE_TOPIC_1 } from "./src/data/seedArticle.ts";
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 const app = express();
 const PORT = 3000;
 
 app.use(express.json());
 
-// Persistent database file in workspace root
-const DB_FILE = path.join(__dirname, "data", "articles_db.json");
+// Persistent database file in workspace root or public fallback
+const DB_FILE = fs.existsSync(path.join(process.cwd(), "data", "articles_db.json"))
+  ? path.join(process.cwd(), "data", "articles_db.json")
+  : path.join(process.cwd(), "public", "data", "articles_db.json");
 
 let memoryDbCache: Record<number, any> | null = null;
 let lastDbMtime = 0;
@@ -352,4 +350,9 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}
+
+export { app };
+export default app;
